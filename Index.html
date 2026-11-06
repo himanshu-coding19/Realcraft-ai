@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>ReelCraft AI</title>
+<style>
+:root{--bg:#15131c;--panel:#1e1b29;--edge:#322e45;--tx:#f3f1fa;--mut:#a9a4c2;--acc:#ff6b5a;--ok:#5fd28a;box-sizing:border-box;padding-top:env(safe-area-inset-top,0)}
+*{box-sizing:border-box}html,body{margin:0}
+body{background:var(--bg);color:var(--tx);font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+.wrap{max-width:520px;margin:auto;padding:14px 14px calc(40px + env(safe-area-inset-bottom,0))}
+h1{font-size:28px;margin:6px 0 10px;letter-spacing:-.02em}h1 b{color:var(--acc)}h2{font-size:18px;margin:0 0 8px}h3{font-size:15px;margin:0 0 8px}
+.card{background:var(--panel);border:1px solid var(--edge);border-radius:14px;padding:14px;margin:12px 0}
+label{display:block;font-size:13px;color:var(--mut);margin:0 0 10px}
+input,select,textarea{display:block;width:100%;margin-top:4px;padding:11px;font:inherit;color:var(--tx);background:var(--bg);border:1px solid var(--edge);border-radius:10px}
+textarea{min-height:64px;resize:vertical}
+button,.btn{font:inherit;font-weight:700;border:1px solid var(--edge);background:transparent;color:var(--tx);padding:10px 12px;border-radius:10px;min-height:44px;text-decoration:none;display:inline-block;text-align:center}
+button.pri,.btn.pri{background:var(--acc);color:#15131c;border-color:var(--acc);width:100%}
+button:disabled{opacity:.45}.row{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0}.row>*{flex:1}
+.mut{color:var(--mut);font-size:13px}.err{color:var(--acc);font-size:13px}.chips span{display:inline-block;margin:0 6px 6px 0;padding:3px 10px;border:1px solid var(--edge);border-radius:99px;font-size:12px}
+.ok{color:var(--ok)}img,video{width:100%;max-width:240px;aspect-ratio:9/16;object-fit:cover;border-radius:12px;background:#000;display:block;margin:6px auto}
+audio{width:100%;height:34px}details summary{cursor:pointer;color:var(--mut);font-size:13px;margin-bottom:8px}
+</style></head><body><main class="wrap">
+<h1>ReelCraft <b>AI</b></h1>
+<div class="card">
+ <div class="chips" id="chips"></div>
+ <label>App password (the one you set on the server)<input id="key" type="password" autocomplete="off"></label>
+ <button id="save">Save and check connections</button><p class="err" id="herr"></p>
+</div>
+
+<div class="card"><h2>1. Story</h2>
+ <label>Topic<textarea id="topic" placeholder="Why do cats purr?"></textarea></label>
+ <label>Narration language<input id="lang" value="English"></label>
+ <label>Animation style<select id="style">
+  <option value="cartoon">2D cartoon</option><option value="pixar" selected>3D Pixar-inspired</option><option value="real">Realistic 3D</option>
+  <option value="doc">Cinematic documentary</option><option value="cute">Cute character</option><option value="dark">Dark mystery</option></select></label>
+ <label>Length<select id="dur"><option value="30">30 seconds (6 scenes)</option><option value="45" selected>45 seconds (7 scenes)</option><option value="60">60 seconds (8 scenes)</option></select></label>
+ <button class="pri" id="story">Write story with AI</button><p class="mut" id="smsg"></p>
+</div>
+
+<div id="work" hidden>
+ <div class="card"><h2>2. Character</h2>
+  <p class="mut">This image is the reference. Every scene image is made from it so the character stays the same.</p>
+  <label>Character description<textarea id="cb"></textarea></label>
+  <label>Setting<textarea id="eb"></textarea></label>
+  <div id="ref"></div>
+  <button class="pri" id="mkref">Create character image</button><p class="mut" id="rmsg"></p>
+ </div>
+ <div class="card"><h2>3. Scenes</h2>
+  <p class="mut">Each image, clip and voice uses paid API credits. Generate one scene first to check quality and price.</p>
+  <button class="pri" id="all">Generate all missing scenes</button><p class="mut" id="amsg"></p>
+ </div>
+ <div id="scenes"></div>
+ <div class="card"><h2>4. Final reel</h2>
+  <p class="mut">Joins all clips into one 1080×1920 MP4 with voiceover, music and sound effects. Needs every scene to have a clip.</p>
+  <button class="pri" id="fin">Build final video</button><p class="mut" id="fmsg"></p><div id="out"></div>
+ </div>
+</div>
+</main>
+<script>
+const $=s=>document.querySelector(s),sleep=ms=>new Promise(r=>setTimeout(r,ms)),esc=s=>String(s??'').replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+let P=null;const K=()=>localStorage.getItem('rc_key')||'';
+const persist=()=>{try{localStorage.setItem('rc_proj',JSON.stringify(P))}catch(e){}};
+async function api(p,b){const r=await fetch(p,{method:b?'POST':'GET',headers:{'content-type':'application/json','x-app-key':K()},body:b&&JSON.stringify(b)});const j=await r.json().catch(()=>({}));if(!r.ok)throw new Error(j.error||('Error '+r.status));return j}
+async function job(p,b,log){const {job:id}=await api(p,b);for(;;){await sleep(3000);const j=await api('/api/jobs/'+id);log&&log(j.log[j.log.length-1]||'');if(j.status==='done')return j.result;if(j.status==='error')throw new Error(j.error)}}
+
+/* prompts: the same character + style text goes into every scene */
+const refPrompt=()=>`${P.styleDesc}. Character design reference, single character, full body, neutral standing pose, clean plain light background, centered, vertical 9:16. ${P.characterBible}. No text.`;
+const keyPrompt=s=>`Place this exact same character, with identical face, hair, clothes, colors and proportions as in the reference image, into a new scene. ${P.styleDesc}. Setting: ${P.environmentBible}. ${s.visualPrompt}. Vertical 9:16, no text, no logos.`;
+const clipPrompt=s=>`${s.motionPrompt}. ${P.styleDesc}. Smooth natural animation, the character stays identical, no text, no subtitles.`;
+
+async function health(){try{const h=await api('/api/health');$('#herr').textContent='';
+ $('#chips').innerHTML=[['Story (Gemini)',h.story],['Images + video (fal.ai)',h.fal],['Voice (ElevenLabs)',h.voice]].map(([n,o])=>`<span class="${o?'ok':''}">${o?'✓':'✗'} ${n}</span>`).join('')+`<span>Music/SFX: ${h.audio==='elevenlabs'?'AI':'built-in'}</span>`}
+ catch(e){$('#herr').textContent=e.message}}
+$('#save').onclick=()=>{localStorage.setItem('rc_key',$('#key').value);health()};
+
+$('#story').onclick=async()=>{const topic=$('#topic').value.trim();if(!topic)return $('#smsg').textContent='Enter a topic first.';
+ $('#story').disabled=true;$('#smsg').textContent='Writing story…';
+ try{const p=await api('/api/story',{topic,style:$('#style').value,duration:+$('#dur').value,language:$('#lang').value||'English'});
+  p.scenes=p.scenes.map(s=>({...s}));P=p;persist();$('#smsg').textContent='Story ready. Create the character image next.';draw()}
+ catch(e){$('#smsg').textContent=e.message}$('#story').disabled=false};
+
+$('#cb').oninput=e=>{P.characterBible=e.target.value;persist()};$('#eb').oninput=e=>{P.environmentBible=e.target.value;persist()};
+$('#mkref').onclick=async()=>{$('#mkref').disabled=true;$('#rmsg').textContent='Creating… (about 10–30 s)';
+ try{P.refUrl=await job('/api/job/image',{prompt:refPrompt()});persist();$('#rmsg').textContent='Not happy? Edit the description and create again.';draw()}
+ catch(e){$('#rmsg').textContent=e.message}$('#mkref').disabled=false};
+
+async function step(i,what){const s=P.scenes[i],set=m=>{s.msg=m;const el=document.getElementById('m'+i);if(el)el.textContent=m};
+ try{
+  if(what==='key'){if(!P.refUrl)throw new Error('Create the character image first.');set('Making scene image…');s.keyUrl=await job('/api/job/keyframe',{prompt:keyPrompt(s),imageUrl:P.refUrl});s.clipUrl=null}
+  if(what==='clip'){if(!s.keyUrl)throw new Error('Make the scene image first.');set('Making video clip… (1–4 min)');s.clipUrl=await job('/api/job/clip',{prompt:clipPrompt(s),imageUrl:s.keyUrl,duration:s.duration},m=>m&&set(m))}
+  if(what==='voice'){set('Making voice…');s.voiceUrl=await job('/api/job/voice',{text:s.narration})}
+  s.msg='';persist()}catch(e){s.msg=e.message}draw()}
+$('#scenes').onclick=e=>{const b=e.target.closest('[data-a]');if(b){b.disabled=true;step(+b.dataset.i,b.dataset.a)}};
+$('#scenes').oninput=e=>{const t=e.target;if(t.dataset.k){P.scenes[+t.dataset.i][t.dataset.k]=t.value;persist()}};
+
+$('#all').onclick=async()=>{if(!confirm('This uses paid credits for every missing image, clip and voice. Continue?'))return;
+ $('#all').disabled=true;const idx=P.scenes.map((_,i)=>i);let k=0;
+ await Promise.all([0,1].map(async()=>{while(k<idx.length){const i=idx[k++],s=P.scenes[i];
+  if(!s.keyUrl)await step(i,'key');if(P.scenes[i].keyUrl&&!P.scenes[i].clipUrl)await step(i,'clip');if(!P.scenes[i].voiceUrl)await step(i,'voice')}}));
+ $('#amsg').textContent='Done. Check the scenes, then build the final video.';$('#all').disabled=false};
+
+$('#fin').onclick=async()=>{$('#fin').disabled=true;$('#out').innerHTML='';$('#fmsg').textContent='Starting…';
+ try{const url=await job('/api/job/final',{scenes:P.scenes.map(s=>({clipUrl:s.clipUrl,voiceUrl:s.voiceUrl,duration:s.duration})),musicPrompt:P.musicPrompt},m=>m&&($('#fmsg').textContent=m+' (this can take several minutes)'));
+  $('#fmsg').textContent='Finished. Download it now: the server may delete files when it sleeps.';
+  $('#out').innerHTML=`<video src="${url}" controls playsinline></video><a class="btn pri" href="${url}" download="reel.mp4">Download MP4</a>`}
+ catch(e){$('#fmsg').textContent=e.message}$('#fin').disabled=false};
+
+function draw(){if(!P)return;$('#work').hidden=false;$('#cb').value=P.characterBible;$('#eb').value=P.environmentBible;
+ $('#ref').innerHTML=P.refUrl?`<img src="${P.refUrl}" alt="Character reference">`:'';
+ $('#scenes').innerHTML=P.scenes.map((s,i)=>`<div class="card"><h3>${i+1}. ${esc(s.title)} · ${s.duration}s</h3>
+ ${s.clipUrl?`<video src="${s.clipUrl}" controls playsinline loop></video>`:s.keyUrl?`<img src="${s.keyUrl}" alt="Scene image">`:''}
+ <label>Voiceover<textarea data-i="${i}" data-k="narration">${esc(s.narration)}</textarea></label>
+ <details><summary>Edit prompts</summary>
+  <label>What we see<textarea data-i="${i}" data-k="visualPrompt">${esc(s.visualPrompt)}</textarea></label>
+  <label>Movement, camera, background, lighting<textarea data-i="${i}" data-k="motionPrompt">${esc(s.motionPrompt)}</textarea></label></details>
+ <div class="row"><button data-a="key" data-i="${i}">${s.keyUrl?'Redo image':'1. Image'}</button><button data-a="clip" data-i="${i}">${s.clipUrl?'Redo clip':'2. Clip'}</button><button data-a="voice" data-i="${i}">${s.voiceUrl?'Redo voice':'3. Voice'}</button></div>
+ ${s.voiceUrl?`<audio src="${s.voiceUrl}" controls></audio>`:''}<p class="${s.msg&&!/^Making/.test(s.msg)?'err':'mut'}" id="m${i}">${esc(s.msg||'')}</p></div>`).join('')}
+try{const p=localStorage.getItem('rc_proj');if(p){P=JSON.parse(p);draw()}}catch(e){}
+$('#key').value=K();if(K())health();
+</script></body></html>
